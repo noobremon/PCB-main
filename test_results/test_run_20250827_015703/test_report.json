@@ -1,0 +1,183 @@
+{
+  "timestamp": "2025-08-27T01:57:03.719951",
+  "test_results": [
+    {
+      "filename": "PCB_1_OK.JPG",
+      "expected_defects": 0,
+      "expected_types": [],
+      "actual_defects": 0,
+      "actual_types": [],
+      "is_passed": false,
+      "processing_time": 0,
+      "details": "Error during test: 'IndustrialPCBInspector' object has no attribute 'inspect_pcb'"
+    },
+    {
+      "filename": "PCB_1_MissingHole_01.jpg",
+      "expected_defects": 1,
+      "expected_types": [
+        "missing_component"
+      ],
+      "actual_defects": 0,
+      "actual_types": [],
+      "is_passed": false,
+      "processing_time": 0,
+      "details": "Error during test: 'IndustrialPCBInspector' object has no attribute 'inspect_pcb'"
+    },
+    {
+      "filename": "PCB_4_open_circuit_01.jpg",
+      "expected_defects": 1,
+      "expected_types": [
+        "broken_trace"
+      ],
+      "actual_defects": 0,
+      "actual_types": [],
+      "is_passed": false,
+      "processing_time": 0,
+      "details": "Error during test: 'IndustrialPCBInspector' object has no attribute 'inspect_pcb'"
+    },
+    {
+      "filename": "PCB_5_short_01.jpg",
+      "expected_defects": 1,
+      "expected_types": [
+        "solder_defect"
+      ],
+      "actual_defects": 0,
+      "actual_types": [],
+      "is_passed": false,
+      "processing_time": 0,
+      "details": "Error during test: 'IndustrialPCBInspector' object has no attribute 'inspect_pcb'"
+    },
+    {
+      "filename": "PCB_6_spur_01.jpg",
+      "expected_defects": 1,
+      "expected_types": [
+        "scratch"
+      ],
+      "actual_defects": 0,
+      "actual_types": [],
+      "is_passed": false,
+      "processing_time": 0,
+      "details": "Error during test: 'IndustrialPCBInspector' object has no attribute 'inspect_pcb'"
+    },
+    {
+      "filename": "PCB_7_mouse_bite_01.jpg",
+      "expected_defects": 1,
+      "expected_types": [
+        "hole"
+      ],
+      "actual_defects": 0,
+      "actual_types": [],
+      "is_passed": false,
+      "processing_time": 0,
+      "details": "Error during test: 'IndustrialPCBInspector' object has no attribute 'inspect_pcb'"
+    },
+    {
+      "filename": "PCB_8_spurious_copper_01.jpg",
+      "expected_defects": 1,
+      "expected_types": [
+        "solder_defect"
+      ],
+      "actual_defects": 0,
+      "actual_types": [],
+      "is_passed": false,
+      "processing_time": 0,
+      "details": "Error during test: 'IndustrialPCBInspector' object has no attribute 'inspect_pcb'"
+    }
+  ],
+  "metrics": {
+    "total_tests": 7,
+    "passed": 0,
+    "failed": 0,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "processing_times": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "defect_type_accuracy": {},
+    "confusion_matrix": {
+      "true_positive": 0,
+      "false_positive": 0,
+      "true_negative": 0,
+      "false_negative": 0
+    },
+    "pass_rate": 0.0,
+    "fail_rate": 0.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "avg_processing_time": 0.0,
+    "min_processing_time": 0,
+    "max_processing_time": 0,
+    "precision": 0,
+    "recall": 0,
+    "f1_score": 0
+  },
+  "config": {
+    "test_cases": [
+      {
+        "image": "PCB_1_OK.JPG",
+        "expected_defects": 0,
+        "description": "Good PCB with no defects"
+      },
+      {
+        "image": "PCB_1_MissingHole_01.jpg",
+        "expected_defects": 1,
+        "expected_types": [
+          "missing_component"
+        ],
+        "description": "PCB with missing hole component"
+      },
+      {
+        "image": "PCB_4_open_circuit_01.jpg",
+        "expected_defects": 1,
+        "expected_types": [
+          "broken_trace"
+        ],
+        "description": "PCB with open circuit defect"
+      },
+      {
+        "image": "PCB_5_short_01.jpg",
+        "expected_defects": 1,
+        "expected_types": [
+          "solder_defect"
+        ],
+        "description": "PCB with short circuit defect"
+      },
+      {
+        "image": "PCB_6_spur_01.jpg",
+        "expected_defects": 1,
+        "expected_types": [
+          "scratch"
+        ],
+        "description": "PCB with spur defect"
+      },
+      {
+        "image": "PCB_7_mouse_bite_01.jpg",
+        "expected_defects": 1,
+        "expected_types": [
+          "hole"
+        ],
+        "description": "PCB with mouse bite defect"
+      },
+      {
+        "image": "PCB_8_spurious_copper_01.jpg",
+        "expected_defects": 1,
+        "expected_types": [
+          "solder_defect"
+        ],
+        "description": "PCB with spurious copper"
+      }
+    ],
+    "performance_metrics": {
+      "max_processing_time": 5.0,
+      "min_accuracy": 0.85,
+      "max_false_positive_rate": 0.1,
+      "max_false_negative_rate": 0.15
+    }
+  }
+}

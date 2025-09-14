@@ -1,0 +1,18 @@
+{
+  "capture_delay": 1.0,
+  "inspection_timeout": 30.0,
+  "result_display_time": 10.0,
+  "next_pcb_wait_time": 5.0,
+  "auto_mode_interval": 15.0,
+  "image_stabilization_frames": 3,
+  "image_stabilization_delay": 0.5,
+  "min_quality_score": 50.0,
+  "auto_save_defective": true,
+  "auto_save_all": false,
+  "results_directory": "inspection_results",
+  "max_history_size": 1000,
+  "enable_audio_alerts": true,
+  "enable_visual_alerts": true,
+  "beep_on_defect": true,
+  "beep_on_good": false
+}

@@ -1,0 +1,28 @@
+# Optional requirements for industrial camera support
+# 
+# These are additional dependencies for industrial camera systems
+# that are not required for basic OpenCV camera functionality.
+#
+# To install these optional dependencies:
+# pip install -r requirements-industrial.txt
+#
+# Note: Some industrial camera SDKs (like Baumer GenICam SDK) 
+# require manual installation from the manufacturer's website
+# and are not available through PyPI.
+
+# Industrial camera interfaces (install manually from manufacturer)
+# pgbm - Baumer GenICam SDK (not available on PyPI)
+# Note: Download from https://www.baumer.com/us/en/service-support/downloads/software
+#
+# Alternative industrial camera libraries available on PyPI:
+# pypylon>=1.7.0  # Basler cameras
+# pyueye>=4.90.0  # IDS cameras
+# pymba>=0.3.1    # Allied Vision cameras
+
+# Enhanced image processing for industrial applications
+scikit-image>=0.19.0
+imageio>=2.22.0
+tifffile>=2022.10.10
+
+# Performance optimization
+numba>=0.56.0

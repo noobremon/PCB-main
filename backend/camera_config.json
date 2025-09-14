@@ -1,0 +1,12 @@
+{
+  "preferred_camera": "baumer",
+  "baumer_camera_id": "",
+  "opencv_camera_index": 0,
+  "resolution": [
+    1920,
+    1080
+  ],
+  "auto_capture_interval": 5.0,
+  "image_format": "jpg",
+  "quality": 95
+}

@@ -1,0 +1,17 @@
+{
+  "preferred_camera": "opencv",
+  "baumer_camera_id": "",
+  "opencv_camera_index": 0,
+  "resolution": [
+    1280,
+    720
+  ],
+  "auto_capture_interval": 0.1,
+  "image_format": "jpg",
+  "quality": 80,
+  "fps": 30,
+  "buffer_size": 2,
+  "auto_focus": 1,
+  "auto_exposure": 0.75,
+  "exposure": -4.0
+}
