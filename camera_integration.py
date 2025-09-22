@@ -220,27 +220,33 @@ class BaumerSDKCamera(CameraInterface):
     def disconnect(self):
         """Disconnect from the camera and clean up resources"""
         try:
-            # Clean up OpenCV camera if in use
-            if self._opencv_fallback and self._opencv_camera is not None:
-                self._opencv_camera.release()
-                self._opencv_camera = None
-                self._opencv_fallback = False
-                self._is_camera_connected = False
-                logger.info("Disconnected OpenCV camera")
-                return
-                
-            # Clean up Baumer camera if in use
+            # First, ensure any ongoing capture is stopped
+            if hasattr(self, '_capture_thread') and self._capture_thread is not None:
+                if hasattr(self, '_stop_capture'):
+                    self._stop_capture.set()
+                self._capture_thread.join(timeout=2.0)
+                self._capture_thread = None
+            
+            # Clean up Baumer resources if they exist
             if self._is_baumer_available:
                 try:
-                    if hasattr(self, '_stream') and self._stream is not None:
-                        self._stream.StopAcquisition()
+                    if self._stream is not None:
+                        self._stream.Close()
                         self._stream = None
-                    if hasattr(self, '_device') and self._device is not None:
-                        self._device.StopAcquisition()
-                        self._device.DeInit()
+                    
+                    if self._nodemap is not None:
+                        self._nodemap = None
+                        
+                    if self._device is not None:
+                        self._device.Close()
                         self._device = None
-                    logger.info("Disconnected Baumer camera")
+                        
+                    if self._system is not None:
+                        self._system = None
+                        
+                    logger.info("Successfully disconnected from Baumer camera")
                 except Exception as e:
+                    logger.warning(f"Error during Baumer camera cleanup: {str(e)}")
                     logger.error(f"Error disconnecting Baumer camera: {e}")
                 finally:
                     # Reset Baumer camera state to allow reconnection
@@ -876,6 +882,9 @@ class CameraManager:
         Returns:
             bool: True if connection was successful, False otherwise
         """
+        # Add a small delay to ensure previous disconnection is complete
+        import time
+        time.sleep(0.5)
         camera_type = (camera_type or self.preferred_camera).lower()
         
         # If Baumer camera is requested but not available, return False
@@ -897,11 +906,23 @@ class CameraManager:
             try:
                 if camera_type == 'baumer':
                     self.logger.info(f"Attempt {attempt + 1}/{max_retries}: Connecting to Baumer camera...")
+                    # Reset any existing camera instance
+                    if hasattr(self, 'current_camera') and self.current_camera is not None:
+                        try:
+                            if hasattr(self.current_camera, 'reset'):
+                                self.current_camera.reset()
+                            self.current_camera.disconnect()
+                        except Exception as e:
+                            self.logger.warning(f"Error resetting previous camera: {e}")
+                        self.current_camera = None
+                    
+                    # Create new camera instance
                     self.current_camera = BaumerSDKCamera(
                         camera_id=0,  # Default to first Baumer camera
                         config={
                             'use_opencv_fallback': False,  # Don't fall back to OpenCV automatically
-                            'require_baumer': True  # Require Baumer to work, no fallback
+                            'require_baumer': True,  # Require Baumer to work, no fallback
+                            'auto_reconnect': True  # Enable auto-reconnection
                         }
                     )
                 else:
