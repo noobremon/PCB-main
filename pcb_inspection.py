@@ -181,23 +181,93 @@ class PCBInspector:
 
     def build_reference_model(self) -> bool:
         """
-        Build reference model from good PCB images
+        Build reference model from good and defective PCB images
         
         Returns:
             True if successful, False otherwise
         """
         try:
-            good_images = glob.glob(str(self.good_path / "*.jpg")) + \
-                         glob.glob(str(self.good_path / "*.png")) + \
-                         glob.glob(str(self.good_path / "*.bmp"))
+            # Get all good PCB images
+            good_images = (glob.glob(str(self.good_path / "*.jpg")) + 
+                         glob.glob(str(self.good_path / "*.png")) + 
+                         glob.glob(str(self.good_path / "*.bmp")))
             
-            if not good_images:
-                logger.warning("No good PCB images found for training")
+            # Get all defective PCB images
+            defective_images = (glob.glob(str(self.defective_path / "*.jpg")) + 
+                              glob.glob(str(self.defective_path / "*.png")) + 
+                              glob.glob(str(self.defective_path / "*.bmp")))
+            
+            if not good_images and not defective_images:
+                logger.warning("No training images found in dataset directory")
                 return False
             
-            logger.info(f"Building reference model from {len(good_images)} good PCB images")
+            logger.info(f"Building reference model from {len(good_images)} good and {len(defective_images)} defective PCB images")
             
             reference_features = []
+            defect_patterns = []
+            
+            # Process good images
+            for img_path in good_images:
+                try:
+                    image = cv2.imread(img_path)
+                    if image is None:
+                        logger.warning(f"Could not read image: {img_path}")
+                        continue
+                        
+                    # Preprocess and extract features
+                    processed = self.preprocess_image(image)
+                    features = self.extract_features(processed)
+                    reference_features.append(features)
+                    
+                    # Store as a reference template
+                    self.reference_templates.append({
+                        'image': image,
+                        'features': features,
+                        'is_defective': False
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Error processing {img_path}: {str(e)}")
+                    continue
+            
+            # Process defective images
+            for img_path in defective_images:
+                try:
+                    image = cv2.imread(img_path)
+                    if image is None:
+                        logger.warning(f"Could not read image: {img_path}")
+                        continue
+                        
+                    # Preprocess and extract features
+                    processed = self.preprocess_image(image)
+                    features = self.extract_features(processed)
+                    
+                    # Store defect patterns
+                    defect_patterns.append({
+                        'image': image,
+                        'features': features,
+                        'is_defective': True
+                    })
+                    
+                    # Also add to reference features to understand normal variations
+                    reference_features.append(features)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing {img_path}: {str(e)}")
+                    continue
+            
+            if not reference_features:
+                logger.error("No valid images processed for reference model")
+                return False
+                
+            # Calculate baseline statistics from good images
+            self.baseline_features = self._calculate_baseline_stats(reference_features)
+            
+            # Store defect patterns
+            self.defect_patterns = defect_patterns
+            
+            logger.info("Reference model built successfully")
+            return True
             
             for img_path in good_images:
                 image = cv2.imread(img_path)
@@ -226,30 +296,73 @@ class PCBInspector:
 
     def _calculate_baseline_stats(self, features_list: List[Dict]) -> Dict[str, Any]:
         """
-        Calculate baseline statistics from good PCB features
+        Calculate baseline statistics from features
         
         Args:
             features_list: List of feature dictionaries
             
         Returns:
-            Baseline statistics
+            Dictionary containing baseline statistics
         """
-        baseline = {}
+        if not features_list:
+            return {}
         
-        # Calculate mean and std for numerical features
-        numerical_features = ['mean_intensity', 'std_intensity', 'edge_density', 
-                            'contour_count', 'total_contour_area', 'component_count']
+        # Initialize stats dictionary
+        stats = {
+            'mean_intensity': [],
+            'std_intensity': [],
+            'edge_density': [],
+            'contour_count': [],
+            'total_contour_area': [],
+            'component_count': [],
+            'defect_features': []  # Store features from defective images
+        }
         
-        for feature in numerical_features:
-            values = [f[feature] for f in features_list if feature in f]
-            if values:
-                baseline[f'{feature}_mean'] = np.mean(values)
-                baseline[f'{feature}_std'] = np.std(values)
+        # Collect all features
+        for features in features_list:
+            if isinstance(features, dict):
+                if 'is_defective' in features and features['is_defective']:
+                    stats['defect_features'].append(features)
+                else:
+                    if 'mean_intensity' in features:
+                        stats['mean_intensity'].append(features['mean_intensity'])
+                    if 'std_intensity' in features:
+                        stats['std_intensity'].append(features.get('std_intensity', 0))
+                    if 'edge_density' in features:
+                        stats['edge_density'].append(features.get('edge_density', 0))
+                    if 'contour_count' in features:
+                        stats['contour_count'].append(features.get('contour_count', 0))
+                    if 'total_contour_area' in features:
+                        stats['total_contour_area'].append(features.get('total_contour_area', 0))
+                    if 'component_count' in features:
+                        stats['component_count'].append(features.get('component_count', 0))
         
-        # Average histogram
-        histograms = [f['histogram'] for f in features_list if 'histogram' in f]
-        if histograms:
-            baseline['avg_histogram'] = np.mean(histograms, axis=0)
+        # Calculate statistics with safe defaults
+        def safe_stats(values, default=0):
+            if not values:
+                return {'mean': default, 'std': default, 'min': default, 'max': default}
+            return {
+                'mean': float(np.mean(values)),
+                'std': float(np.std(values)) if len(values) > 1 else default,
+                'min': float(min(values)) if values else default,
+                'max': float(max(values)) if values else default
+            }
+        
+        baseline = {
+            'mean_intensity': safe_stats(stats['mean_intensity']),
+            'std_intensity': safe_stats(stats['std_intensity']),
+            'edge_density': safe_stats(stats['edge_density']),
+            'contour_count': safe_stats(stats['contour_count']),
+            'total_contour_area': safe_stats(stats['total_contour_area']),
+            'component_count': safe_stats(stats['component_count']),
+            'defect_features': stats['defect_features']  # Store defect features for comparison
+        }
+        
+        # Add histogram if available
+        if 'histogram' in features_list[0]:
+            histograms = [f['histogram'] for f in features_list if 'histogram' in f]
+            if histograms:
+                baseline['avg_histogram'] = np.mean(histograms, axis=0)
         
         return baseline
 
