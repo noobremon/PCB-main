@@ -34,7 +34,6 @@ from io import BytesIO
 from PIL import Image
 import asyncio
 import threading
-from flask import send_from_directory
 
 # Configure logging with UTF-8 encoding
 class UTF8StreamHandler(logging.StreamHandler):
