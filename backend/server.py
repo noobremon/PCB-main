@@ -250,8 +250,10 @@ class ConnectionManager:
 
 websocket_manager = ConnectionManager()
 
-# Global variable to track if reference model is built
+# Global variables to track reference model status
 reference_model_built = False
+training_in_progress = False
+training_error = None
 
 async def ensure_reference_model():
     """Ensure reference model is built from good PCB images"""
@@ -305,31 +307,68 @@ async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
-@api_router.post("/pcb/train")
-async def train_pcb_model():
-    """Build reference model from good PCB images"""
+def _train_model_background():
+    """Background task to train the model without blocking the API"""
+    global reference_model_built, training_in_progress, training_error
     try:
+        logger.info("🔄 Starting model training in background...")
         success = pcb_inspector.build_industrial_reference_model()
-        global reference_model_built
         reference_model_built = success
+        training_in_progress = False
         
         if success:
-            return {"message": "Industrial reference model built successfully", "success": True}
+            logger.info("✅ Model training completed successfully")
+            training_error = None
         else:
-            # Return error response instead of raising exception to avoid CORS issues
-            return {
-                "message": "Failed to build reference model. Check if good PCB images exist in dataset/good/",
-                "success": False,
-                "error": "No good PCB images found or model build failed"
-            }
+            logger.warning("⚠️ Model training failed - no good PCB images")
+            training_error = "No good PCB images found"
     except Exception as e:
-        logger.error(f"Error training PCB model: {e}")
-        # Return error response instead of raising exception to avoid CORS issues
+        logger.error(f"❌ Error training PCB model: {e}")
+        training_error = str(e)
+        training_in_progress = False
+
+@api_router.post("/pcb/train")
+async def train_pcb_model():
+    """Start reference model training in background"""
+    global training_in_progress, training_error
+    
+    # Check if already training
+    if training_in_progress:
         return {
-            "message": "Error building reference model",
+            "message": "Training already in progress",
             "success": False,
-            "error": str(e)
+            "training_in_progress": True
         }
+    
+    # Check if already trained
+    if reference_model_built:
+        return {
+            "message": "Model already trained",
+            "success": True,
+            "training_in_progress": False,
+            "already_trained": True
+        }
+    
+    # Start training in background thread
+    training_in_progress = True
+    training_error = None
+    thread = threading.Thread(target=_train_model_background, daemon=True)
+    thread.start()
+    
+    return {
+        "message": "Model training started in background. This may take 15-30 seconds.",
+        "success": True,
+        "training_in_progress": True
+    }
+
+@api_router.get("/pcb/train/status")
+async def get_train_status():
+    """Get current training status"""
+    return {
+        "training_in_progress": training_in_progress,
+        "model_trained": reference_model_built,
+        "error": training_error
+    }
 
 @api_router.post("/pcb/inspect")
 async def inspect_pcb_image(
@@ -539,6 +578,7 @@ async def get_pcb_stats():
                 "defect_rate": 0,
                 "defect_types": [],
                 "reference_model_available": reference_model_built,
+                "training_in_progress": training_in_progress,
                 "session_stats": {},
                 "realtime_available": True
             }
@@ -558,6 +598,7 @@ async def get_pcb_stats():
                     "defect_rate": 0,
                     "defect_types": [],
                     "reference_model_available": reference_model_built,
+                    "training_in_progress": training_in_progress,
                     "session_stats": {},
                     "realtime_available": True
                 }
@@ -608,6 +649,7 @@ async def get_pcb_stats():
             "defect_rate": defective_count / total_inspections if total_inspections > 0 else 0,
             "defect_types": defect_types,
             "reference_model_available": reference_model_built,
+            "training_in_progress": training_in_progress,
             "session_stats": session_stats,
             "realtime_available": True
         }
@@ -621,6 +663,7 @@ async def get_pcb_stats():
             "defect_rate": 0,
             "defect_types": [],
             "reference_model_available": reference_model_built,
+            "training_in_progress": training_in_progress,
             "session_stats": {},
             "realtime_available": True,
             "error": str(e)
