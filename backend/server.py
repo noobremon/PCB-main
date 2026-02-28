@@ -80,16 +80,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Add CORS middleware - Allow all origins temporarily
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://pcb-main.onrender.com",
-        "https://pcb-main-frontend.onrender.com",
-        "https://pcb-frontend.onrender.com",
-        "http://localhost:3000",
-        "http://localhost:3001",
-    ],
+    allow_origin_regex="https://.*\.onrender\.com|http://localhost:.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
