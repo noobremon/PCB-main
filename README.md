@@ -605,6 +605,43 @@ For questions, issues, or feature requests:
 
 ---
 
+## 🌐 Deployment
+
+### Deploy to Render
+
+This project is ready to deploy to Render (or any cloud platform).
+
+**Quick Start:**
+- See [QUICKSTART.md](QUICKSTART.md) for 5-step deployment guide
+- See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment documentation
+
+**What you'll need:**
+1. MongoDB Atlas account (free tier available)
+2. Render account (free tier available)
+3. 15 minutes of your time
+
+**Deployment includes:**
+- ✅ FastAPI backend (Python)
+- ✅ React frontend (Static site)
+- ✅ MongoDB database (Atlas)
+- ✅ Auto-deploy on git push
+- ✅ Free SSL certificates
+- ✅ Environment variable management
+
+**Cost:** Free tier available (with cold starts) or $7/month for always-on backend
+
+**Other Platforms:**
+This project can also be deployed to:
+- Heroku
+- AWS (EC2, Elastic Beanstalk, or ECS)
+- Google Cloud Platform
+- Azure
+- DigitalOcean
+- Railway
+- Fly.io
+
+---
+
 ## 📊 Project Status
 
 **Status**: ✅ Active Development
