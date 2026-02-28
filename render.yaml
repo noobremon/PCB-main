@@ -1,3 +1,18 @@
+# ⚠️ OPTIONAL: Blueprint Configuration for Render
+# 
+# This file allows deploying both services at once using Render Blueprints.
+# However, you can also deploy manually through the Render dashboard:
+#   1. Deploy backend as a Web Service
+#   2. Deploy frontend as a Static Site
+#
+# For manual deployment instructions, see DEPLOYMENT.md or QUICKSTART.md
+#
+# To use this Blueprint:
+#   1. Go to Render Dashboard
+#   2. Click "New +" → "Blueprint"
+#   3. Connect your repository
+#   4. Render will create both services automatically
+
 services:
   # Backend API Service
   - type: web

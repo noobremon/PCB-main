@@ -38,32 +38,38 @@ Render doesn't offer MongoDB directly, so Atlas is recommended.
 
 ---
 
-## 🔧 Step 2: Deploy Backend (FastAPI + Python)
-
-### Method 1: Using Render Dashboard (Easier)
+## 🔧 Step 2: Deploy Backend as Web Service
 
 1. **Login to Render Dashboard**
    - Go to https://dashboard.render.com
+   - Sign in with your GitHub/GitLab account
 
 2. **Create New Web Service**
-   - Click "New +" → "Web Service"
-   - Connect your Git repository
-   - Select your repository (PCB-main)
+   - Click **"New +"** button (top right)
+   - Select **"Web Service"**
+   - Connect your Git repository if not already connected
+   - Select your repository: **PCB-main**
 
 3. **Configure Backend Service**
-   ```
-   Name: pcb-inspection-backend
-   Region: Oregon (US West) or closest to you
-   Branch: main
-   Root Directory: backend
-   Runtime: Python 3
-   Build Command: pip install -r requirements.txt
-   Start Command: uvicorn server:app --host 0.0.0.0 --port $PORT
-   Instance Type: Starter ($7/month) or Free
-   ```
+   
+   Fill in these settings:
+   
+   | Setting | Value |
+   |---------|-------|
+   | **Name** | `pcb-inspection-backend` (or your choice) |
+   | **Region** | Oregon (US West) or closest to you |
+   | **Branch** | `main` |
+   | **Root Directory** | `backend` ⚠️ **Important!** |
+   | **Runtime** | Python 3 (auto-detected) |
+   | **Build Command** | `pip install -r requirements.txt` |
+   | **Start Command** | `uvicorn server:app --host 0.0.0.0 --port $PORT` |
+   | **Instance Type** | Free or Starter ($7/month for no cold starts) |
 
 4. **Add Environment Variables**
-   Click "Advanced" → "Add Environment Variable":
+   
+   Scroll down and click **"Advanced"** → **"Add Environment Variable"**
+   
+   Add these variables one by one:
    
    | Key | Value |
    |-----|-------|
@@ -73,54 +79,58 @@ Render doesn't offer MongoDB directly, so Atlas is recommended.
    | `MAX_UPLOAD_SIZE` | `10485760` |
    | `PYTHON_VERSION` | `3.11.0` |
 
-5. **Deploy**
-   - Click "Create Web Service"
-   - Wait for deployment (5-10 minutes)
-   - Note your backend URL: `https://pcb-inspection-backend.onrender.com`
+5. **Create Web Service**
+   - Click **"Create Web Service"** button at the bottom
+   - Render will start building and deploying (takes 5-10 minutes)
+   - Watch the logs to monitor progress
 
-### Method 2: Using render.yaml (Blueprint)
-
-1. **Use the provided render.yaml file**
-   - The `render.yaml` file in your project root is pre-configured
-   - Just update the MONGO_URL in Render dashboard after deployment
-
-2. **Deploy via Blueprint**
-   - Go to Render Dashboard
-   - Click "New +" → "Blueprint"
-   - Connect your repository
-   - Render will auto-detect `render.yaml` and create services
+6. **Save Your Backend URL**
+   - Once deployed, you'll see your backend URL at the top
+   - It will look like: `https://pcb-inspection-backend.onrender.com`
+   - **Copy this URL** - you'll need it for the frontend!
 
 ---
 
-## 🎨 Step 3: Deploy Frontend (React)
-
-### Configure Frontend Build
+## 🎨 Step 3: Deploy Frontend as Static Site
 
 1. **Create New Static Site**
-   - In Render Dashboard, click "New +" → "Static Site"
-   - Connect your repository
-   - Select your branch
+   - In Render Dashboard, click **"New +"** button (top right)
+   - Select **"Static Site"**
+   - Select the same repository: **PCB-main**
 
 2. **Configure Static Site**
-   ```
-   Name: pcb-inspection-frontend
-   Branch: main
-   Root Directory: frontend
-   Build Command: npm install && npm run build
-   Publish Directory: build
-   ```
+   
+   Fill in these settings:
+   
+   | Setting | Value |
+   |---------|-------|
+   | **Name** | `pcb-inspection-frontend` (or your choice) |
+   | **Branch** | `main` |
+   | **Root Directory** | `frontend` ⚠️ **Important!** |
+   | **Build Command** | `npm install && npm run build` |
+   | **Publish Directory** | `build` |
 
 3. **Add Environment Variable**
-   - Add environment variable:
+   
+   Click **"Advanced"** → **"Add Environment Variable"**
+   
+   Add this variable:
    
    | Key | Value |
    |-----|-------|
-   | `REACT_APP_BACKEND_URL` | Your backend URL from Step 2 (e.g., `https://pcb-inspection-backend.onrender.com`) |
+   | `REACT_APP_BACKEND_URL` | Your backend URL from Step 2<br>(e.g., `https://pcb-inspection-backend.onrender.com`) |
+   
+   ⚠️ **Important:** Make sure to use the exact URL (with `https://`) and **no trailing slash**
 
-4. **Deploy**
-   - Click "Create Static Site"
-   - Wait for build and deployment (3-5 minutes)
-   - Note your frontend URL: `https://pcb-inspection-frontend.onrender.com`
+4. **Create Static Site**
+   - Click **"Create Static Site"** button at the bottom
+   - Render will build and deploy (takes 3-5 minutes)
+   - Watch the build logs to monitor progress
+
+5. **Save Your Frontend URL**
+   - Once deployed, you'll see your frontend URL
+   - It will look like: `https://pcb-inspection-frontend.onrender.com`
+   - **This is your live app URL!** 🎉
 
 ---
 
