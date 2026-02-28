@@ -83,7 +83,12 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_origins=[
+        "https://pcb-main-frontend.onrender.com",  # Your frontend URL
+        "https://pcb-frontend.onrender.com",  # Alternative frontend name
+        "http://localhost:3000",  # Local development
+        "*"  # Allow all for now (remove in production)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
