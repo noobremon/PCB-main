@@ -24,10 +24,10 @@ numpy>=1.26.0
 python-multipart==0.0.9
 jq>=1.6.0
 typer>=0.9.0
-opencv-python==4.9.0.80
-scikit-image==0.22.0
+opencv-python-headless==4.9.0.80
+scikit-image>=0.22.0
 pillow>=10.0.0
-matplotlib==3.8.4
-scipy==1.12.0
-scikit-learn==1.4.2
+matplotlib>=3.8.0
+scipy>=1.13.0
+scikit-learn>=1.4.2
 
