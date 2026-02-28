@@ -316,10 +316,20 @@ async def train_pcb_model():
         if success:
             return {"message": "Industrial reference model built successfully", "success": True}
         else:
-            raise HTTPException(status_code=400, detail="Failed to build reference model. Check if good PCB images exist in dataset/good/")
+            # Return error response instead of raising exception to avoid CORS issues
+            return {
+                "message": "Failed to build reference model. Check if good PCB images exist in dataset/good/",
+                "success": False,
+                "error": "No good PCB images found or model build failed"
+            }
     except Exception as e:
         logger.error(f"Error training PCB model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return error response instead of raising exception to avoid CORS issues
+        return {
+            "message": "Error building reference model",
+            "success": False,
+            "error": str(e)
+        }
 
 @api_router.post("/pcb/inspect")
 async def inspect_pcb_image(
@@ -518,22 +528,73 @@ async def get_pcb_inspections():
 
 @api_router.get("/pcb/stats")
 async def get_pcb_stats():
-    """Get PCB inspection statistics"""
+    """Get PCB inspection statistics from CSV"""
     try:
-        total_inspections = await db.pcb_inspections.count_documents({})
-        defective_count = await db.pcb_inspections.count_documents({"is_defective": True})
+        # Read from CSV file instead of MongoDB
+        if not CSV_LOG_PATH.exists() or os.path.getsize(CSV_LOG_PATH) == 0:
+            return {
+                "total_inspections": 0,
+                "defective_count": 0,
+                "good_count": 0,
+                "defect_rate": 0,
+                "defect_types": [],
+                "reference_model_available": reference_model_built,
+                "session_stats": {},
+                "realtime_available": True
+            }
+        
+        total_inspections = 0
+        defective_count = 0
+        defect_type_counts = {}
+        
+        with open(CSV_LOG_PATH, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f.readlines() if line.strip()]
+            
+            if len(lines) <= 1:
+                return {
+                    "total_inspections": 0,
+                    "defective_count": 0,
+                    "good_count": 0,
+                    "defect_rate": 0,
+                    "defect_types": [],
+                    "reference_model_available": reference_model_built,
+                    "session_stats": {},
+                    "realtime_available": True
+                }
+            
+            reader = csv.DictReader(lines)
+            for row in reader:
+                try:
+                    if not row.get('id') or not row.get('filename'):
+                        continue
+                    
+                    total_inspections += 1
+                    
+                    # Count defective
+                    is_defective = str(row.get("is_defective", "")).lower() == "true"
+                    if is_defective:
+                        defective_count += 1
+                    
+                    # Count defect types
+                    defects_str = row.get("defects", "")
+                    if defects_str.startswith('[') and defects_str.endswith(']'):
+                        try:
+                            defects = json.loads(defects_str)
+                            for defect in defects:
+                                defect_type = defect.get("type", "unknown")
+                                defect_type_counts[defect_type] = defect_type_counts.get(defect_type, 0) + 1
+                        except:
+                            pass
+                
+                except Exception as e:
+                    logger.warning(f"Skipping row in stats calculation: {str(e)}")
+                    continue
+        
         good_count = total_inspections - defective_count
         
-        # Get defect type statistics
-        pipeline = [
-            {"$unwind": "$defects"},
-            {"$group": {"_id": "$defects.type", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}}
-        ]
-        
-        defect_types = []
-        async for doc in db.pcb_inspections.aggregate(pipeline):
-            defect_types.append({"type": doc["_id"], "count": doc["count"]})
+        # Format defect types
+        defect_types = [{"type": k, "count": v} for k, v in defect_type_counts.items()]
+        defect_types.sort(key=lambda x: x["count"], reverse=True)
         
         # Get workflow session stats if available
         session_stats = {}
@@ -552,7 +613,18 @@ async def get_pcb_stats():
         }
     except Exception as e:
         logger.error(f"Error getting PCB stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return empty stats instead of raising exception to avoid CORS issues
+        return {
+            "total_inspections": 0,
+            "defective_count": 0,
+            "good_count": 0,
+            "defect_rate": 0,
+            "defect_types": [],
+            "reference_model_available": reference_model_built,
+            "session_stats": {},
+            "realtime_available": True,
+            "error": str(e)
+        }
 
 # Real-time inspection endpoints
 @api_router.get("/pcb/realtime/available-cameras")
