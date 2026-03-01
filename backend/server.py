@@ -12,7 +12,6 @@ if parent_dir not in sys.path:
 from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Request, Form
 from realtime_workflow import InspectionState
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import tempfile
@@ -96,8 +95,8 @@ api_router = APIRouter(prefix="/api")
 for directory in ["defective_storage", "dataset/good", "dataset/defective"]:
     Path(directory).mkdir(parents=True, exist_ok=True)
 
-# Mount static files for defective images
-app.mount("/api/pcb/defective", StaticFiles(directory=os.path.join(ROOT_DIR, "..", "defective_storage")), name="defective_storage")
+# Note: Static files mount removed to prevent CORS conflicts
+# All file serving is now handled through the API endpoint below
 
 @api_router.get("/pcb/defective/{filename}")
 async def get_defective_image(filename: str):

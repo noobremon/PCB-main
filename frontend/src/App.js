@@ -1039,7 +1039,6 @@ function App() {
                                     {history.length > 0 ? (
                     <div className="space-y-3 max-h-96 overflow-y-auto">
                       {history.slice(0, 10).map((inspection, index) => {
-                        console.log(`Inspection ${index}:`, inspection); // Debug each inspection
                         return (
                           <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors">
                             <div className="flex items-center space-x-3">
