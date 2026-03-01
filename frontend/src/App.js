@@ -45,6 +45,14 @@ function App() {
   // WebSocket connection
   const ws = useRef(null);
   const previewInterval = useRef(null);
+  const wsReconnectTimer = useRef(null);
+  const wsReconnectAttempts = useRef(0);
+  const realtimeModeRef = useRef(realtimeMode);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    realtimeModeRef.current = realtimeMode;
+  }, [realtimeMode]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -52,6 +60,10 @@ function App() {
       if (previewInterval.current) {
         clearInterval(previewInterval.current);
         previewInterval.current = null;
+      }
+      if (wsReconnectTimer.current) {
+        clearTimeout(wsReconnectTimer.current);
+        wsReconnectTimer.current = null;
       }
       if (ws.current) {
         ws.current.close();
@@ -65,8 +77,6 @@ function App() {
     fetchHistory();
     fetchCameras();
     
-    // No automatic refresh - only fetch once on component mount
-    
     // Setup WebSocket for real-time updates (only in realtime mode)
     if (realtimeMode) {
       setupWebSocket();
@@ -74,6 +84,10 @@ function App() {
     
     // Cleanup function
     return () => {
+      if (wsReconnectTimer.current) {
+        clearTimeout(wsReconnectTimer.current);
+        wsReconnectTimer.current = null;
+      }
       if (ws.current) {
         ws.current.close();
       }
@@ -95,11 +109,20 @@ function App() {
 
   // Setup WebSocket connection
   const setupWebSocket = () => {
+    // Don't connect if not in realtime mode
+    if (!realtimeModeRef.current) return;
+    
+    // Close existing connection if any
+    if (ws.current && ws.current.readyState !== WebSocket.CLOSED) {
+      ws.current.close();
+    }
+    
     const wsUrl = API_BASE_URL.replace('http', 'ws') + '/api/realtime/ws';
     ws.current = new WebSocket(wsUrl);
     
     ws.current.onopen = () => {
       console.log('WebSocket connected');
+      wsReconnectAttempts.current = 0; // Reset backoff on success
     };
     
     ws.current.onmessage = (event) => {
@@ -109,12 +132,16 @@ function App() {
     
     ws.current.onclose = () => {
       console.log('WebSocket disconnected');
-      // Auto-reconnect after 3 seconds
-      setTimeout(() => {
-        if (realtimeMode) {
-          setupWebSocket();
-        }
-      }, 3000);
+      // Only auto-reconnect if still in realtime mode, with exponential backoff
+      if (realtimeModeRef.current) {
+        const delay = Math.min(3000 * Math.pow(2, wsReconnectAttempts.current), 30000);
+        wsReconnectAttempts.current += 1;
+        wsReconnectTimer.current = setTimeout(() => {
+          if (realtimeModeRef.current) {
+            setupWebSocket();
+          }
+        }, delay);
+      }
     };
     
     ws.current.onerror = (error) => {

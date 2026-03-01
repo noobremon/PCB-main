@@ -1407,8 +1407,7 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         websocket_manager.disconnect(websocket)
 
-# Include the router in the main app
-app.include_router(api_router)
+# NOTE: api_router is included at the bottom of the file, after all routes are defined
 
 # Configure logging
 logging.basicConfig(
@@ -1422,38 +1421,21 @@ async def shutdown_db_client():
     client.close()
 
 
-### BEGIN: PCB INSPECTION ENDPOINTS (ADDED)
-from pydantic import BaseModel
-from typing import List, Dict, Any
-import uuid, csv, io
-import cv2
-import numpy as np
+### BEGIN: ADDITIONAL HELPERS & UNIQUE ENDPOINTS
 import sys
+import io
 
 # Increase CSV field size limit to handle large JSON data
-# Use a large but safe value instead of sys.maxsize
 try:
     csv.field_size_limit(sys.maxsize)
 except OverflowError:
-    # If sys.maxsize is too large, use a smaller value
-    csv.field_size_limit(2147483647)  # Maximum 32-bit integer value
+    csv.field_size_limit(2147483647)
 
 # Ensure CSV file exists with headers
 if not CSV_LOG_PATH.exists():
     with open(CSV_LOG_PATH, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(["id","timestamp","mode","filename","is_defective","confidence_score","defect_count","defects","annotated_relpath"])
-
-class InspectionResponse(BaseModel):
-    id: str
-    is_defective: bool
-    confidence_score: float
-    defect_count: int
-    defects: List[Dict[str, Any]]
-    visualization_path: str  # path relative to API host, like /storage/<file>.jpg
-    filename: str
-    mode: str = "manual"
-    timestamp: str
 
 def _ensure_csv_headers():
     """Ensure CSV file exists with proper headers."""
@@ -1481,7 +1463,6 @@ def _append_csv(row: Dict[str, Any]) -> bool:
         with open(CSV_LOG_PATH, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
-            # For defects field, only store the count as a string to avoid field size issues
             defect_count = 0
             if "defects" in row:
                 if isinstance(row["defects"], list):
@@ -1502,7 +1483,7 @@ def _append_csv(row: Dict[str, Any]) -> bool:
                 str(row.get("is_defective", "false")).lower(),
                 str(float(row.get("confidence_score", 0.0))),
                 str(int(row.get("defect_count", 0))),
-                str(defect_count),  # Just store the count as a string
+                str(defect_count),
                 str(row.get("annotated_relpath", ""))
             ])
         return True
@@ -1510,69 +1491,12 @@ def _append_csv(row: Dict[str, Any]) -> bool:
         logger.error(f"Error appending to CSV: {e}")
         return False
 
-def _simple_annotate(image_bytes: bytes, label: str) -> np.ndarray:
-    image_array = np.frombuffer(image_bytes, dtype=np.uint8)
-    img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-    if img is None:
-        # Create placeholder if decode fails
-        img = np.zeros((400, 600, 3), dtype=np.uint8)
-        cv2.putText(img, "Invalid image", (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-    # Draw simple overlay
-    h, w = img.shape[:2]
-    cv2.rectangle(img, (10,10), (w-10,h-10), (0,0,255), 2)
-    cv2.putText(img, label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,255,0), 2)
-    return img
+# --- Unique endpoints (no duplicates on api_router) ---
 
-@app.post("/api/pcb/inspect", response_model=InspectionResponse)
-async def api_inspect_pcb(file: UploadFile = File(...)):
-    """
-    Manual inspection endpoint.
-    Saves annotated image and logs CSV; returns path for frontend display.
-    If the core inspector is available, you can wire it in here; for now we fall back to a simple overlay.
-    """
-    try:
-        content = await file.read()
-        unique_id = str(uuid.uuid4())
-        ts = datetime.utcnow().isoformat()
-        filename = file.filename or f"{unique_id}.jpg"
-        safe_name = Path(filename).name
-        annotated_name = f"{Path(safe_name).stem}__{unique_id}_annotated.jpg"
-        ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
-
-        # TODO: integrate real inspector; fallback simple annotate
-        label = "Inspection OK (demo)"
-        annotated = _simple_annotate(content, label=label)
-        save_path = ANNOTATED_DIR / annotated_name
-        cv2.imwrite(str(save_path), annotated)
-
-        # Build response
-        record = {
-            "id": unique_id,
-            "timestamp": ts,
-            "mode": "manual",
-            "filename": safe_name,
-            "is_defective": False,
-            "confidence_score": 0.0,
-            "defect_count": 0,
-            "defects": [],
-            "annotated_relpath": f"/{annotated_name}",
-        }
-        _append_csv(record)
-
-        resp = {
-            **record,
-            "visualization_path": f"/storage{record['annotated_relpath']}"
-        }
-        return resp
-    except Exception as e:
-        logger.exception("Inspection failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/pcb/test-data")
+@api_router.post("/pcb/test-data")
 async def create_test_data():
     """Create some test inspection data for development"""
     try:
-        # Create test inspection records
         test_records = [
             {
                 "id": "test-1",
@@ -1597,176 +1521,63 @@ async def create_test_data():
                 "annotated_relpath": "/api/pcb/defective/defective_pcb_20250822_181751.jpg"
             }
         ]
-        
-        # Append to CSV
         for record in test_records:
             _append_csv(record)
-            
         return {"message": "Test data created successfully", "count": len(test_records)}
     except Exception as e:
         logger.error(f"Error creating test data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/pcb/test")
+@api_router.get("/pcb/test")
 async def test_endpoint():
     """Simple test endpoint to verify backend is working"""
     return {"message": "Backend is working", "timestamp": datetime.utcnow().isoformat()}
 
-@app.get("/api/pcb/inspections")
-async def api_list_inspections():
-    """Return logged inspections as JSON with proper error handling."""
-    try:
-        if not _ensure_csv_headers():
-            return {"items": [], "count": 0, "error": "Failed to initialize CSV file"}
-            
-        rows = []
-        
-        # Check if file exists and has content
-        if not CSV_LOG_PATH.exists() or os.path.getsize(CSV_LOG_PATH) == 0:
-            return {"items": [], "count": 0}
-            
-        with open(CSV_LOG_PATH, 'r', encoding='utf-8') as f:
-            # Read all lines and filter out empty ones
-            lines = [line.strip() for line in f.readlines() if line.strip()]
-            
-            # If only header exists or file is empty
-            if len(lines) <= 1:
-                return {"items": [], "count": 0}
-                
-            # Parse CSV data
-            reader = csv.DictReader(lines)
-            for row in reader:
-                try:
-                    # Skip empty rows or rows with missing required fields
-                    if not row.get('id') or not row.get('filename'):
-                        continue
-                        
-                    # Convert types with proper error handling
-                    try:
-                        row["is_defective"] = str(row.get("is_defective", "")).lower() == "true"
-                        row["confidence_score"] = float(row.get("confidence_score", 0) or 0)
-                        row["defect_count"] = int(row.get("defect_count", 0) or 0)
-                        
-                        # Parse defects field - now it's just a count stored as string
-                        defects = row.get("defects", "0")
-                        try:
-                            # If it's a number (stored as string), create an empty array with that length
-                            if defects.isdigit():
-                                count = int(defects)
-                                row["defects"] = [{"type": "unknown"} for _ in range(count)]
-                            # Try to parse as JSON if it looks like JSON
-                            elif defects.startswith('[') and defects.endswith(']'):
-                                try:
-                                    row["defects"] = json.loads(defects)
-                                except:
-                                    row["defects"] = []
-                            else:
-                                row["defects"] = []
-                        except Exception:
-                            row["defects"] = []
-                        
-                        # Add visualization path
-                        annotated_path = row.get('annotated_relpath', '').strip()
-                        if annotated_path:
-                            # The annotated_relpath already contains the full API path like /api/pcb/defective/filename.jpg
-                            row["visualization_path"] = annotated_path
-                        else:
-                            row["visualization_path"] = None
-                        
-                        rows.append(row)
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Skipping invalid row {row}: {str(e)}")
-                        continue
-                        
-                except Exception as e:
-                    logger.error(f"Error parsing row: {str(e)}")
-                    continue
-        
-        # Sort by timestamp descending (newest first) - ensuring most recent inspections appear at the top
-        rows.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-        logger.info(f"Sorted {len(rows)} inspections, newest first")
-        
-        # Return only the most recent 50 inspections to prevent UI overload
-        result = {"items": rows[:50], "count": len(rows)}
-        logger.info(f"Returning {len(result['items'])} inspections to frontend")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error in api_list_inspections: {str(e)}")
-        return {"items": [], "count": 0, "error": str(e)}
-
-@app.get("/api/pcb/inspections.csv")
+@api_router.get("/pcb/inspections.csv")
 async def api_download_inspections_csv():
-    """Send the CSV file for direct download with proper headers and data validation."""
+    """Send the CSV file for direct download."""
     try:
         if not _ensure_csv_headers():
             raise HTTPException(status_code=500, detail="Failed to initialize CSV file")
             
-        # Check if file exists and has content
         if not CSV_LOG_PATH.exists() or os.path.getsize(CSV_LOG_PATH) == 0:
-            # Return empty CSV with headers
-            # Match field names with _append_csv function
             headers = ["id", "timestamp", "mode", "filename", 
                      "is_defective", "confidence_score", 
                      "defect_count", "defects", "annotated_relpath"]
-            
-            # Create in-memory CSV
             output = io.StringIO()
             writer = csv.writer(output)
             writer.writerow(headers)
-            
             return StreamingResponse(
                 iter([output.getvalue()]),
                 media_type="text/csv",
                 headers={"Content-Disposition": "attachment; filename=inspections.csv"}
             )
         
-        # Read and validate CSV content
         valid_rows = []
         with open(CSV_LOG_PATH, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             for row in reader:
-                # Skip invalid rows
                 if not row.get('id') or not row.get('filename'):
                     continue
-                    
-                # Simplify defects field to just show count
-                if 'defects' in row:
+                if 'defects' in row and isinstance(row['defects'], str):
                     try:
-                        # If it's a string that might be JSON, convert to count
-                        if isinstance(row['defects'], str):
-                            try:
-                                defects_data = json.loads(row['defects'])
-                                if isinstance(defects_data, list):
-                                    row['defects'] = str(len(defects_data))
-                                else:
-                                    row['defects'] = "0"
-                            except:
-                                row['defects'] = "0"
+                        defects_data = json.loads(row['defects'])
+                        row['defects'] = str(len(defects_data)) if isinstance(defects_data, list) else "0"
                     except:
                         row['defects'] = "0"
-                        
                 valid_rows.append(row)
         
-        # Create in-memory CSV with only valid rows
         output = io.StringIO()
-        # Use the actual fieldnames from the CSV file if available, otherwise use defaults
         default_fieldnames = ["id", "timestamp", "mode", "filename", 
                             "is_defective", "confidence_score", 
                             "defect_count", "defects", "annotated_relpath"]
         writer = csv.DictWriter(output, fieldnames=fieldnames if fieldnames else default_fieldnames)
-        
-        # Write header and rows
         writer.writeheader()
         for row in valid_rows:
-            # Ensure all fields are present in the row
-            valid_row = {}
-            for field in (fieldnames if fieldnames else default_fieldnames):
-                valid_row[field] = row.get(field, "")
+            valid_row = {field: row.get(field, "") for field in (fieldnames if fieldnames else default_fieldnames)}
             writer.writerow(valid_row)
         
-        # Return the cleaned CSV data
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
@@ -1775,139 +1586,30 @@ async def api_download_inspections_csv():
                 "Content-Type": "text/csv; charset=utf-8"
             }
         )
-        
     except Exception as e:
         logger.error(f"Error in api_download_inspections_csv: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to generate CSV download: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to generate CSV: {str(e)}")
 
-@app.get("/api/realtime/camera/preview")
+@api_router.get("/realtime/camera/preview")
 async def api_realtime_preview():
     """Return raw camera preview with timestamp"""
     try:
         if not camera_manager:
             return generate_placeholder_image("Camera manager not initialized")
-        
         if not camera_manager.is_camera_connected():
             return generate_placeholder_image("Camera not connected")
-            
-        # Capture frame
         frame = camera_manager.capture_single_image()
         if frame is None:
             return generate_placeholder_image("Failed to capture frame")
-            
-        # Add timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cv2.putText(frame, timestamp, (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
         return create_image_response(frame)
-        
     except Exception as e:
         logger.error(f"Error in preview: {e}")
         return generate_placeholder_image("Error: " + str(e))
 
-def detect_defects(frame):
-    """
-    Enhanced defect detection to match professional AOI machine output
-    
-    Args:
-        frame: Input BGR image
-        
-    Returns:
-        List of detected defects with detailed information
-    """
-    try:
-        # Convert to grayscale and apply CLAHE for better contrast
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
-        
-        # Use adaptive thresholding for better defect detection
-        thresh = cv2.adaptiveThreshold(
-            blurred, 255, 
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-            cv2.THRESH_BINARY_INV, 11, 2
-        )
-        
-        # Morphological operations to clean up the image
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        morph = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        morph = cv2.morphologyEx(morph, cv2.MORPH_OPEN, kernel)
-        
-        # Find contours with hierarchy
-        contours, hierarchy = cv2.findContours(
-            morph, 
-            cv2.RETR_TREE, 
-            cv2.CHAIN_APPROX_SIMPLE
-        )
-        
-        defects = []
-        for i, contour in enumerate(contours):
-            # Skip small contours
-            area = cv2.contourArea(contour)
-            if area < 50:  # Increased minimum area to reduce noise
-                continue
-                
-            # Get bounding box and aspect ratio
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = float(w) / h if h != 0 else 0
-            
-            # Skip if contour is too large (likely part of the board)
-            if area > (frame.shape[0] * frame.shape[1]) * 0.1:  # Skip if > 10% of image
-                continue
-            
-            # Calculate contour properties
-            perimeter = cv2.arcLength(contour, True)
-            circularity = 4 * np.pi * (area / (perimeter ** 2)) if perimeter > 0 else 0
-            hull = cv2.convexHull(contour)
-            hull_area = cv2.contourArea(hull)
-            solidity = float(area) / hull_area if hull_area > 0 else 0
-            
-            # Calculate defect confidence score (0-1)
-            confidence = min(1.0, (area / 500.0) * solidity * (1 - circularity))
-            
-            # Classify defect type
-            if aspect_ratio > 3.0 or aspect_ratio < 0.33:
-                defect_type = "Scratch"
-                confidence *= 0.9  # Slightly reduce confidence for scratches
-            elif circularity < 0.3 and (aspect_ratio > 2.0 or aspect_ratio < 0.5):
-                defect_type = "Crack"
-                confidence *= 0.85  # Slightly reduce confidence for cracks
-            else:
-                defect_type = "Spot"
-                confidence *= 0.95  # Slightly reduce confidence for spots
-            
-            # Only include high-confidence defects
-            if confidence > 0.6:  # Increased threshold for better precision
-                defects.append({
-                    'bbox': (x, y, w, h),
-                    'type': defect_type,
-                    'confidence': round(confidence, 2),
-                    'area': int(area),
-                    'perimeter': round(perimeter, 2),
-                    'circularity': round(circularity, 2),
-                    'solidity': round(solidity, 2)
-                })
-        
-        # Sort defects by confidence (highest first)
-        defects.sort(key=lambda x: x['confidence'], reverse=True)
-        
-        # Limit the number of defects to prevent overwhelming the output
-        max_defects = 10
-        if len(defects) > max_defects:
-            defects = defects[:max_defects]
-        
-        return defects
-        
-    except Exception as e:
-        logger.error(f"Error in defect detection: {str(e)}")
-        return []
+# --- Helper functions for image responses ---
 
 def generate_placeholder_image(message):
     """Generate a placeholder image with error message"""
@@ -1923,39 +1625,6 @@ def generate_placeholder_image(message):
             "Expires": "0"
         }
     )
-
-def enhance_image(image):
-    """Enhance image quality"""
-    try:
-        # Convert to LAB color space for better color enhancement
-        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
-        l, a, b = cv2.split(lab)
-        
-        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        cl = clahe.apply(l)
-        
-        # Merge the enhanced L channel with the original a and b channels
-        limg = cv2.merge((cl, a, b))
-        
-        # Convert back to RGB color space
-        enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
-        
-        # Adjust contrast and brightness
-        alpha = 1.2  # Contrast control (1.0-3.0)
-        beta = 10    # Brightness control (0-100)
-        enhanced = cv2.convertScaleAbs(enhanced, alpha=alpha, beta=beta)
-        
-        # Apply sharpening
-        kernel = np.array([[-1,-1,-1],
-                         [-1, 9,-1],
-                         [-1,-1,-1]])
-        enhanced = cv2.filter2D(enhanced, -1, kernel)
-        
-        return enhanced
-    except Exception as e:
-        logger.error(f"Error enhancing image: {e}")
-        return image
 
 def create_image_response(image):
     """Create a streaming response from an image"""
@@ -1973,9 +1642,11 @@ def create_image_response(image):
         }
     )
 
-### END: PCB INSPECTION ENDPOINTS (ADDED)
+### END: ADDITIONAL HELPERS & UNIQUE ENDPOINTS
+
+# Include the router in the main app (MUST be after all @api_router routes are defined)
+app.include_router(api_router)
 
 @app.get("/health")
 async def health():
     return {"ok": True}
-
