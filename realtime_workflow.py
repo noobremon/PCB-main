@@ -62,13 +62,14 @@ class InspectionResult:
 class InspectionWorkflowManager:
     """Industrial PCB inspection workflow manager"""
     
-    def __init__(self, config_file: str = "workflow_config.json"):
+    def __init__(self, config_file: str = "workflow_config.json", pcb_inspector=None):
         self.config_file = config_file
         self.config = self.load_config()
         
         # Initialize components (camera_manager is now initialized lazily)
         self.camera_manager = None
-        self.pcb_inspector = IndustrialPCBInspector()
+        # Accept an external inspector to avoid duplicating heavy resources
+        self.pcb_inspector = pcb_inspector or IndustrialPCBInspector()
         
         # Workflow state
         self.current_state = InspectionState.IDLE

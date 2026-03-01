@@ -30,6 +30,11 @@ import os
 # when the Baumer SDK is not installed
 logger = logging.getLogger(__name__)
 
+import platform
+_IS_WINDOWS = platform.system() == "Windows"
+# Use DirectShow on Windows, generic backend elsewhere (Linux/macOS)
+_DEFAULT_CAP_BACKEND = cv2.CAP_DSHOW if _IS_WINDOWS else cv2.CAP_ANY
+
 class CameraInterface(ABC):
     """Abstract base class for camera interfaces"""
     
@@ -143,15 +148,14 @@ class BaumerSDKCamera(CameraInterface):
                 self._opencv_camera.release()
             
             # Try to open the camera
-            self._opencv_camera = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)  # Use DSHOW on Windows
+            self._opencv_camera = cv2.VideoCapture(self.camera_id, _DEFAULT_CAP_BACKEND)
             
             if not self._opencv_camera.isOpened():
                 # Try with different backends if default fails
-                backends = [
-                    cv2.CAP_DSHOW,  # DirectShow (Windows)
-                    cv2.CAP_MSMF,   # Microsoft Media Foundation (Windows)
-                    cv2.CAP_ANY     # Auto-detect
-                ]
+                backends = (
+                    [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY] if _IS_WINDOWS
+                    else [cv2.CAP_V4L2, cv2.CAP_ANY]
+                )
                 
                 for backend in backends:
                     self._opencv_camera = cv2.VideoCapture(self.camera_id, backend)
@@ -434,22 +438,14 @@ class OpenCVCamera(CameraInterface):
         # Check the first 5 indices (most systems won't have more than this)
         for i in range(5):
             try:
-                # Try with DirectShow first (Windows)
-                cap = cv2.VideoCapture(i + cv2.CAP_DSHOW)
+                # Try with platform-appropriate backend first
+                cap = cv2.VideoCapture(i, _DEFAULT_CAP_BACKEND)
                 if cap.isOpened() and cap.read()[0]:
                     available_cameras.append(i)
                     cap.release()
                     time.sleep(0.1)
                     continue
                 
-                # Try with MSMF (Windows)
-                cap = cv2.VideoCapture(i + cv2.CAP_MSMF)
-                if cap.isOpened() and cap.read()[0]:
-                    available_cameras.append(i)
-                    cap.release()
-                    time.sleep(0.1)
-                    continue
-                    
                 # Try with default backend
                 cap = cv2.VideoCapture(i)
                 if cap.isOpened() and cap.read()[0]:
@@ -466,15 +462,14 @@ class OpenCVCamera(CameraInterface):
         """Try to open a camera with the given index"""
         try:
             # Try different backends in order of preference
-            backends = [
-                cv2.CAP_DSHOW,  # DirectShow (Windows)
-                cv2.CAP_MSMF,   # Microsoft Media Foundation (Windows)
-                cv2.CAP_ANY     # Any available backend
-            ]
+            backends = (
+                [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY] if _IS_WINDOWS
+                else [cv2.CAP_V4L2, cv2.CAP_ANY]
+            )
             
             for backend in backends:
                 try:
-                    cap = cv2.VideoCapture(index + backend)
+                    cap = cv2.VideoCapture(index, backend)
                     if cap.isOpened():
                         # Test if we can actually read a frame
                         ret, _ = cap.read()
@@ -907,7 +902,7 @@ class CameraManager:
             for i in range(10):  # Check first 10 indices
                 cap = None
                 try:
-                    cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)  # Use DSHOW on Windows for better performance
+                    cap = cv2.VideoCapture(i, _DEFAULT_CAP_BACKEND)
                     if cap.isOpened():
                         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))

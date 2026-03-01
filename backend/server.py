@@ -46,14 +46,17 @@ class UTF8StreamHandler(logging.StreamHandler):
         except Exception:
             self.handleError(record)
 
-# Configure root logger
+# Configure root logger – skip FileHandler on Render (ephemeral filesystem)
+_log_handlers = [UTF8StreamHandler()]
+try:
+    _log_handlers.append(logging.FileHandler('app.log', encoding='utf-8'))
+except (OSError, PermissionError):
+    pass  # on some cloud hosts writing files here may fail
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        UTF8StreamHandler(),
-        logging.FileHandler('app.log', encoding='utf-8')
-    ]
+    handlers=_log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -68,10 +71,23 @@ from realtime_workflow import InspectionWorkflowManager
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# MongoDB connection – use .get() so missing env vars produce a clear error
+# instead of a raw KeyError that crashes the process silently.
+mongo_url = os.environ.get('MONGO_URL')
+db_name = os.environ.get('DB_NAME', 'pcb_inspection')
+
+if not mongo_url:
+    logger.error(
+        "MONGO_URL environment variable is NOT set! "
+        "Set it in the Render dashboard → Environment tab. "
+        "The server will start but database operations will fail."
+    )
+    # Use a dummy client so the server can at least start and serve /health
+    client = None
+    db = None
+else:
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[db_name]
 
 # Create the main app with CORS and settings
 app = FastAPI(
@@ -192,10 +208,8 @@ ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
 CSV_LOG_PATH = BASE_DIR / "inspections.csv"
 REALTIME_LAST = ANNOTATED_DIR / "realtime" / "last_annotated.jpg"
 
-# Initialize Camera Manager and Workflow Manager with retry logic
+# Camera and Workflow initialization is deferred to the startup event below
 MAX_RETRIES = 3
-camera_manager = None
-workflow_manager = None
 
 def log_camera_info(cameras):
     """Log information about available cameras"""
@@ -251,21 +265,39 @@ def initialize_camera():
     
     return None
 
-# Initialize camera manager
-camera_manager = initialize_camera()
+# --- Lazy initialization: camera + workflow are set up at startup event, not at
+# module load.  This avoids blocking import on headless servers (Render) where
+# cv2.VideoCapture probes 10 indices with Windows-only backends for ~30 s.
+camera_manager = None
+workflow_manager = None
 
-# Initialize workflow manager with error handling
-try:
-    workflow_manager = InspectionWorkflowManager()
-    if camera_manager:
-        workflow_manager.camera_manager = camera_manager
-        logger.info("✅ Workflow manager initialized with camera support")
+@app.on_event("startup")
+async def _lazy_init_camera_and_workflow():
+    """Initialize camera & workflow AFTER the server is listening."""
+    global camera_manager, workflow_manager
+    import platform
+    # Skip camera probing entirely on Linux (Render is headless, no webcam)
+    if platform.system() != "Windows":
+        logger.info("Headless Linux detected – skipping camera initialization")
+        camera_manager = None
     else:
-        logger.warning("⚠️ Workflow manager initialized without camera support")
-        
-except Exception as e:
-    logger.error(f"❌ Failed to initialize workflow manager: {e}")
-    workflow_manager = None
+        camera_manager = initialize_camera()
+
+    try:
+        workflow_manager = InspectionWorkflowManager(pcb_inspector=pcb_inspector)
+        if camera_manager:
+            workflow_manager.camera_manager = camera_manager
+            logger.info("Workflow manager initialized with camera support")
+        else:
+            logger.warning("Workflow manager initialized without camera support")
+    except Exception as e:
+        logger.error(f"Failed to initialize workflow manager: {e}")
+        workflow_manager = None
+
+    # Register workflow callbacks
+    if workflow_manager is not None:
+        workflow_manager.add_state_callback(on_state_change)
+        workflow_manager.add_result_callback(on_inspection_result)
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -327,12 +359,7 @@ def on_inspection_result(result_data):
         'data': result_data
     }))
 
-# Setup workflow callbacks
-if workflow_manager is not None:
-    workflow_manager.add_state_callback(on_state_change)
-    workflow_manager.add_result_callback(on_inspection_result)
-else:
-    logger.warning("⚠️ Workflow manager is None - callbacks not registered")
+# NOTE: workflow callbacks are registered inside _lazy_init_camera_and_workflow()
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -343,11 +370,14 @@ async def root():
 async def create_status_check(input: StatusCheckCreate):
     status_dict = input.dict()
     status_obj = StatusCheck(**status_dict)
-    _ = await db.status_checks.insert_one(status_obj.dict())
+    if db is not None:
+        _ = await db.status_checks.insert_one(status_obj.dict())
     return status_obj
 
 @api_router.get("/status", response_model=List[StatusCheck])
 async def get_status_checks():
+    if db is None:
+        return []
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
@@ -489,7 +519,8 @@ async def inspect_pcb_image(
         
         # Store in database
         try:
-            await db.pcb_inspections.insert_one(result_data.dict())
+            if db is not None:
+                await db.pcb_inspections.insert_one(result_data.dict())
         except Exception as db_err:
             logger.warning(f"DB insert failed: {db_err}")
         
@@ -1418,7 +1449,8 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    if client is not None:
+        client.close()
 
 
 ### BEGIN: ADDITIONAL HELPERS & UNIQUE ENDPOINTS

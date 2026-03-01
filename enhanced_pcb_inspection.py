@@ -11,6 +11,8 @@ import glob
 import json
 from pathlib import Path
 from typing import List, Dict, Tuple, Any, Optional
+import matplotlib
+matplotlib.use('Agg')  # Headless backend - must be before pyplot import
 import matplotlib.pyplot as plt
 from scipy import ndimage, signal
 from skimage import feature, measure, morphology, segmentation, filters
