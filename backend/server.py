@@ -33,6 +33,7 @@ from io import BytesIO
 from PIL import Image
 import asyncio
 import threading
+import gc
 
 # Configure logging with UTF-8 encoding
 class UTF8StreamHandler(logging.StreamHandler):
@@ -354,21 +355,28 @@ def _train_model_background():
     """Background task to train the model without blocking the API"""
     global reference_model_built, training_in_progress, training_error
     try:
-        logger.info("🔄 Starting model training in background...")
+        logger.info("Starting model training in background...")
+        gc.collect()  # Free memory before training
         success = pcb_inspector.build_industrial_reference_model()
         reference_model_built = success
         training_in_progress = False
         
         if success:
-            logger.info("✅ Model training completed successfully")
+            logger.info("Model training completed successfully")
             training_error = None
         else:
-            logger.warning("⚠️ Model training failed - no good PCB images")
+            logger.warning("Model training failed - no good PCB images")
             training_error = "No good PCB images found"
+    except MemoryError:
+        logger.error("Out of memory during training! Dataset too large for server RAM.")
+        training_error = "Out of memory - server has insufficient RAM for training"
+        training_in_progress = False
+        gc.collect()
     except Exception as e:
-        logger.error(f"❌ Error training PCB model: {e}")
+        logger.error(f"Error training PCB model: {e}")
         training_error = str(e)
         training_in_progress = False
+        gc.collect()
 
 @api_router.post("/pcb/train")
 async def train_pcb_model():

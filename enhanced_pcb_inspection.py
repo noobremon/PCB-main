@@ -600,11 +600,30 @@ class IndustrialPCBInspector:
         # Log transform for better numerical stability
         return -np.sign(hu_moments) * np.log10(np.abs(hu_moments) + 1e-10)
 
+    @staticmethod
+    def _resize_for_training(image: np.ndarray, max_dim: int = 512) -> np.ndarray:
+        """Resize image to limit memory usage during training while preserving aspect ratio."""
+        h, w = image.shape[:2]
+        if max(h, w) <= max_dim:
+            return image
+        scale = max_dim / max(h, w)
+        new_w, new_h = int(w * scale), int(h * scale)
+        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
     def build_industrial_reference_model(self) -> bool:
         """
-        Build enhanced industrial-grade reference model using both good and defective samples
-        This ensures consistent detection across ALL modes (manual, real-time Baumer, real-time USB)
+        Build enhanced industrial-grade reference model using both good and defective samples.
+        Memory-safe: resizes images before processing and limits sample counts
+        to avoid OOM on constrained environments (e.g. Render 512 MB).
         """
+        import random
+
+        # ------- Tunables for memory safety -------
+        MAX_GOOD_SAMPLES = 10       # Process at most this many good images
+        MAX_DEFECTIVE_SAMPLES = 30  # Process at most this many defective images
+        TRAIN_IMG_MAX_DIM = 512     # Resize images to this max dimension
+        # -------------------------------------------
+
         try:
             # Load good PCB images for reference templates
             good_images = glob.glob(str(self.good_path / "*.jpg")) + \
@@ -619,92 +638,118 @@ class IndustrialPCBInspector:
                               glob.glob(str(self.defective_path / "*.jpeg"))
             
             if not good_images:
-                logger.error("❌ No good PCB images found in dataset/good/. Please add good PCB images for training.")
+                logger.error("No good PCB images found in dataset/good/. Please add good PCB images for training.")
                 return False
             
-            logger.info(f"🏭 Building INDUSTRIAL REFERENCE MODEL")
-            logger.info(f"   📁 Good PCBs: {len(good_images)} images")
-            logger.info(f"   📁 Defective PCBs: {len(defective_images)} images")
+            # Sample a subset to stay within memory limits
+            if len(good_images) > MAX_GOOD_SAMPLES:
+                random.shuffle(good_images)
+                good_images = good_images[:MAX_GOOD_SAMPLES]
+            if len(defective_images) > MAX_DEFECTIVE_SAMPLES:
+                random.shuffle(defective_images)
+                defective_images = defective_images[:MAX_DEFECTIVE_SAMPLES]
+
+            logger.info(f"Building INDUSTRIAL REFERENCE MODEL")
+            logger.info(f"   Good PCBs: {len(good_images)} images (sampled)")
+            logger.info(f"   Defective PCBs: {len(defective_images)} images (sampled)")
             
             # Process good images for reference templates and baseline features
             reference_features = []
             good_feature_vectors = []
             
-            logger.info("   🔄 Processing good PCB images...")
+            logger.info("   Processing good PCB images...")
             for i, img_path in enumerate(good_images):
-                image = cv2.imread(img_path)
-                if image is None:
-                    logger.warning(f"Could not load image: {img_path}")
+                try:
+                    image = cv2.imread(img_path)
+                    if image is None:
+                        logger.warning(f"Could not load image: {img_path}")
+                        continue
+                    
+                    # Resize to limit memory
+                    image = self._resize_for_training(image, TRAIN_IMG_MAX_DIM)
+                    
+                    logger.info(f"      Processing good PCB {i+1}/{len(good_images)}: {Path(img_path).name}")
+                    
+                    processed = self.advanced_preprocess_image(image)
+                    features = self.extract_advanced_features(processed)
+                    reference_features.append(features)
+                    
+                    # Create feature vector for anomaly detection
+                    feature_vector = self._create_feature_vector(features)
+                    good_feature_vectors.append(feature_vector)
+                    
+                    # Store multiple reference templates (up to 5 for variety)
+                    if len(self.reference_templates) < 5:
+                        self.reference_templates.append(processed['enhanced'])
+                    
+                    # Extract and store component templates
+                    self._extract_component_templates(processed['cleaned'])
+                    
+                    # Free memory eagerly
+                    del image, processed
+                except Exception as img_err:
+                    logger.warning(f"Skipping good image {img_path}: {img_err}")
                     continue
-                
-                logger.info(f"      Processing good PCB {i+1}/{len(good_images)}: {Path(img_path).name}")
-                
-                processed = self.advanced_preprocess_image(image)
-                features = self.extract_advanced_features(processed)
-                reference_features.append(features)
-                
-                # Create feature vector for anomaly detection
-                feature_vector = self._create_feature_vector(features)
-                good_feature_vectors.append(feature_vector)
-                
-                # Store multiple reference templates (up to 5 for variety)
-                if len(self.reference_templates) < 5:
-                    self.reference_templates.append(processed['enhanced'])
-                
-                # Extract and store component templates
-                self._extract_component_templates(processed['cleaned'])
+                finally:
+                    if (i + 1) % 5 == 0:
+                        gc.collect()
             
             # Process defective images for defect pattern learning
             defect_feature_vectors = []
             defect_patterns = []
             
-            # Trigger garbage collection periodically
             gc.collect()
-
             
             if defective_images:
-                logger.info("   🔄 Processing defective PCB images for defect pattern learning...")
+                logger.info("   Processing defective PCB images for defect pattern learning...")
                 for i, img_path in enumerate(defective_images):
-                    image = cv2.imread(img_path)
-                    if image is None:
-                        logger.warning(f"Could not load defective image: {img_path}")
+                    try:
+                        image = cv2.imread(img_path)
+                        if image is None:
+                            logger.warning(f"Could not load defective image: {img_path}")
+                            continue
+                        
+                        # Resize to limit memory
+                        image = self._resize_for_training(image, TRAIN_IMG_MAX_DIM)
+                        
+                        logger.info(f"      Processing defective PCB {i+1}/{len(defective_images)}: {Path(img_path).name}")
+                        
+                        processed = self.advanced_preprocess_image(image)
+                        features = self.extract_advanced_features(processed)
+                        
+                        # Store defect patterns for comparison (only keep vector, not full features)
+                        feature_vec = self._create_feature_vector(features)
+                        defect_signature = {
+                            'image_path': img_path,
+                            'features': features,
+                            'vector': feature_vec,
+                        }
+                        defect_feature_vectors.append(feature_vec)
+                        defect_patterns.append(defect_signature)
+                        
+                        # Free memory eagerly
+                        del image, processed
+                    except Exception as img_err:
+                        logger.warning(f"Skipping defective image {img_path}: {img_err}")
                         continue
-                    
-                    logger.info(f"      Processing defective PCB {i+1}/{len(defective_images)}: {Path(img_path).name}")
-                    
-                    processed = self.advanced_preprocess_image(image)
-                    features = self.extract_advanced_features(processed)
-                    
-                    # Store defect patterns for comparison
-                    defect_signature = {
-                        'image_path': img_path,
-                        'features': features,
-                        'vector': self._create_feature_vector(features),
-                    }
-                    
-                    defect_patterns.append(defect_signature)
-                    
-                    # Clean up loop variables for memory management
-                    del image, processed
-                    
-                    if (i + 1) % 50 == 0:
-                        gc.collect()
-
+                    finally:
+                        if (i + 1) % 5 == 0:
+                            gc.collect()
 
                 self.defect_patterns = defect_patterns
-                logger.info(f"      ✅ Learned {len(defect_patterns)} defect patterns")
+                logger.info(f"      Learned {len(defect_patterns)} defect patterns")
             
             # Calculate enhanced baseline statistics from good images
             if reference_features:
-                logger.info("   📊 Calculating baseline statistics...")
+                logger.info("   Calculating baseline statistics...")
                 self.baseline_features = self._calculate_enhanced_baseline_stats(reference_features)
                 
                 if not self.baseline_features:
-                    logger.warning("   ⚠️ Failed to calculate baseline features")
+                    logger.warning("   Failed to calculate baseline features")
                     self.baseline_features = {}  # Ensure it's not None
                 
                 # Train advanced anomaly detector using both good and defective data
-                logger.info("   🤖 Training ML anomaly detector...")
+                logger.info("   Training ML anomaly detector...")
                 all_features = good_feature_vectors.copy()
                 labels = [0] * len(good_feature_vectors)  # 0 for good
                 
@@ -716,42 +761,46 @@ class IndustrialPCBInspector:
                     feature_matrix = np.array(all_features)
                     
                     # Use Isolation Forest for unsupervised anomaly detection
-                    # Contamination rate based on actual defective ratio or fallback to detection_params
                     if defect_feature_vectors:
                         contamination_rate = len(defect_feature_vectors) / len(all_features)
-                        contamination_rate = max(0.05, min(0.5, contamination_rate))  # Keep between 5% and 50%
+                        contamination_rate = max(0.05, min(0.5, contamination_rate))
                         contamination_value = float(contamination_rate)
                     else:
-                        # Use automatic detection when no defective samples available
-                        contamination_value = 'auto'  # type: ignore  # scikit-learn accepts both float and 'auto'
+                        contamination_value = 'auto'  # type: ignore
                     
                     self.anomaly_detector = IsolationForest(
-                        contamination=contamination_value,  # type: ignore  # scikit-learn accepts both float and 'auto'
+                        contamination=contamination_value,  # type: ignore
                         random_state=42,
-                        n_estimators=200,  # More trees for better accuracy
+                        n_estimators=100,  # Reduced from 200 for memory safety
                         max_samples='auto',
                         bootstrap=True
                     )
                     self.anomaly_detector.fit(feature_matrix)
                     
-                    logger.info(f"      ✅ ML model trained with contamination: {contamination_value}")
+                    logger.info(f"      ML model trained with contamination: {contamination_value}")
                 
                 # Calculate defect thresholds from actual data
                 self._calculate_industry_thresholds(reference_features, defect_patterns)
                 
-                logger.info("🏭 ✅ INDUSTRIAL REFERENCE MODEL BUILT SUCCESSFULLY!")
-                logger.info(f"   📊 Reference templates: {len(self.reference_templates)}")
-                logger.info(f"   📊 Component templates: {len(self.component_templates)}")
-                logger.info(f"   📊 Defect patterns learned: {len(self.defect_patterns)}")
-                logger.info(f"   📊 Baseline features: {len(self.baseline_features) if self.baseline_features else 0} metrics")
-                logger.info("   🎯 System ready for CONSISTENT inspection across all modes")
+                logger.info("INDUSTRIAL REFERENCE MODEL BUILT SUCCESSFULLY!")
+                logger.info(f"   Reference templates: {len(self.reference_templates)}")
+                logger.info(f"   Component templates: {len(self.component_templates)}")
+                logger.info(f"   Defect patterns learned: {len(self.defect_patterns)}")
+                logger.info(f"   Baseline features: {len(self.baseline_features) if self.baseline_features else 0} metrics")
+                logger.info("   System ready for CONSISTENT inspection across all modes")
                 
+                gc.collect()
                 return True
             
             return False
             
+        except MemoryError:
+            logger.error("Out of memory during model training! Reduce dataset size or increase server RAM.")
+            gc.collect()
+            return False
         except Exception as e:
-            logger.error(f"❌ Error building industrial reference model: {e}")
+            logger.error(f"Error building industrial reference model: {e}")
+            gc.collect()
             return False
 
     def _create_feature_vector(self, features: Dict[str, Any]) -> List[float]:
