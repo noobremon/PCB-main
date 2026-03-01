@@ -79,14 +79,58 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# ---------- CORS: belt-and-suspenders approach ----------
+# 1) Standard Starlette CORSMiddleware (handles most cases)
+ALLOWED_ORIGINS = [
+    "https://pcb-main.onrender.com",
+    "https://pcb-main-frontend.onrender.com",
+    "https://pcb-inspection-frontend.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# 2) Custom middleware that ALWAYS injects CORS headers – catches edge cases
+#    where CORSMiddleware silently drops them (error responses, streaming, etc.)
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
+
+class ForceCORSHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        # Handle preflight (OPTIONS) immediately
+        if request.method == "OPTIONS":
+            return StarletteResponse(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Max-Age": "86400",
+                },
+            )
+        try:
+            response = await call_next(request)
+        except Exception:
+            # Even on unhandled errors, return CORS headers
+            response = StarletteResponse(status_code=500, content="Internal Server Error")
+
+        response.headers.setdefault("Access-Control-Allow-Origin", "*")
+        response.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+        response.headers.setdefault("Access-Control-Allow-Headers", "*")
+        return response
+
+app.add_middleware(ForceCORSHeadersMiddleware)
+# ---------- END CORS ----------
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
