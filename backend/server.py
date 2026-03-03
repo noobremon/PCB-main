@@ -116,35 +116,57 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# 2) Custom middleware that ALWAYS injects CORS headers – catches edge cases
-#    where CORSMiddleware silently drops them (error responses, streaming, etc.)
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request as StarletteRequest
-from starlette.responses import Response as StarletteResponse
+# 2) Raw ASGI middleware that ALWAYS injects CORS headers.
+#    BaseHTTPMiddleware is NOT used because it has known bugs with file-upload
+#    (multipart) requests that can silently drop headers or break the body stream.
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-class ForceCORSHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: StarletteRequest, call_next):
-        # Handle preflight (OPTIONS) immediately
-        if request.method == "OPTIONS":
-            return StarletteResponse(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                    "Access-Control-Allow-Headers": "*",
-                    "Access-Control-Max-Age": "86400",
-                },
-            )
+class ForceCORSHeadersMiddleware:
+    """Pure-ASGI CORS middleware – zero interference with request body."""
+
+    CORS_HEADERS = [
+        (b"access-control-allow-origin", b"*"),
+        (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS, PATCH"),
+        (b"access-control-allow-headers", b"*"),
+        (b"access-control-expose-headers", b"*"),
+    ]
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Fast-path: handle preflight OPTIONS
+        if scope["method"] == "OPTIONS":
+            headers = self.CORS_HEADERS + [
+                (b"access-control-max-age", b"86400"),
+            ]
+            await send({"type": "http.response.start", "status": 200, "headers": headers})
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        # For all other requests, intercept the response start to inject headers
+        async def send_with_cors(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                # Only add if not already present
+                existing = {h[0].lower() for h in headers}
+                for key, value in self.CORS_HEADERS:
+                    if key not in existing:
+                        headers.append((key, value))
+                message = {**message, "headers": headers}
+            await send(message)
+
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_with_cors)
         except Exception:
-            # Even on unhandled errors, return CORS headers
-            response = StarletteResponse(status_code=500, content="Internal Server Error")
-
-        response.headers.setdefault("Access-Control-Allow-Origin", "*")
-        response.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-        response.headers.setdefault("Access-Control-Allow-Headers", "*")
-        return response
+            # Even on unhandled crash, return a 500 WITH CORS headers
+            headers = self.CORS_HEADERS + [(b"content-type", b"text/plain")]
+            await send({"type": "http.response.start", "status": 500, "headers": headers})
+            await send({"type": "http.response.body", "body": b"Internal Server Error"})
 
 app.add_middleware(ForceCORSHeadersMiddleware)
 # ---------- END CORS ----------
@@ -467,15 +489,29 @@ async def inspect_pcb_image(
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        del contents, nparr  # free upload buffer immediately
         
         if image is None:
             raise HTTPException(status_code=400, detail="Invalid image file")
+        
+        # --- Resize to prevent OOM on Render (max 1024px on longest side) ---
+        MAX_DIM = 1024
+        h, w = image.shape[:2]
+        if max(h, w) > MAX_DIM:
+            scale = MAX_DIM / max(h, w)
+            image = cv2.resize(image, (int(w * scale), int(h * scale)),
+                               interpolation=cv2.INTER_AREA)
+            logger.info(f"Resized upload from {w}x{h} to {image.shape[1]}x{image.shape[0]} for inspection")
         
         # Perform inspection
         results = pcb_inspector.detect_industrial_defects(image, source_mode="manual")
         
         # Create industrial visualization
         annotated_image = pcb_inspector.create_industrial_visualization(image, results)
+        
+        # Drop heavy intermediate data that is no longer needed
+        results.pop('processed_images', None)
+        results.pop('features', None)
         
         # Save annotated image temporarily
         temp_filename = f"temp_inspection_{uuid.uuid4().hex}.jpg"
@@ -543,9 +579,14 @@ async def inspect_pcb_image(
         }
         _append_csv(csv_record)
         
+        # Free heavy objects before returning
+        del image, annotated_image
+        gc.collect()
+        
         return result_dict
         
     except Exception as e:
+        gc.collect()
         logger.error(f"Error inspecting PCB: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
