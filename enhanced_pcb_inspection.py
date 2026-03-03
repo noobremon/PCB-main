@@ -719,18 +719,28 @@ class IndustrialPCBInspector:
                         processed = self.advanced_preprocess_image(image)
                         features = self.extract_advanced_features(processed)
                         
-                        # Store defect patterns for comparison (only keep vector, not full features)
+                        # Store defect patterns — keep only the lightweight vector
+                        # and scalar features (for pattern similarity), NOT the full
+                        # features dict (which holds numpy arrays and would consume
+                        # hundreds of MB across 30 images).
                         feature_vec = self._create_feature_vector(features)
+                        # Keep only scalar features needed by _calculate_pattern_similarity
+                        scalar_keys = [
+                            'mean_intensity', 'std_intensity', 'edge_density',
+                            'component_count', 'glcm_contrast', 'glcm_homogeneity',
+                            'hist_entropy', 'skewness', 'kurtosis',
+                        ]
+                        lightweight_features = {k: features[k] for k in scalar_keys if k in features}
                         defect_signature = {
                             'image_path': img_path,
-                            'features': features,
+                            'features': lightweight_features,
                             'vector': feature_vec,
                         }
                         defect_feature_vectors.append(feature_vec)
                         defect_patterns.append(defect_signature)
                         
                         # Free memory eagerly
-                        del image, processed
+                        del image, processed, features
                     except Exception as img_err:
                         logger.warning(f"Skipping defective image {img_path}: {img_err}")
                         continue
@@ -783,6 +793,10 @@ class IndustrialPCBInspector:
                 
                 # Calculate defect thresholds from actual data
                 self._calculate_industry_thresholds(reference_features, defect_patterns)
+                
+                # Free training-only data
+                del reference_features, good_feature_vectors, defect_feature_vectors
+                gc.collect()
                 
                 logger.info("INDUSTRIAL REFERENCE MODEL BUILT SUCCESSFULLY!")
                 logger.info(f"   Reference templates: {len(self.reference_templates)}")

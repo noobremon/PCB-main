@@ -241,11 +241,46 @@ function App() {
     setError(null);
     
     try {
-      await axios.post(`${API_BASE_URL}/api/pcb/train`);
+      const startRes = await axios.post(`${API_BASE_URL}/api/pcb/train`);
+      
+      // If already trained, we're done
+      if (startRes.data.already_trained) {
+        setModelStatus({ trained: true, training: false });
+        fetchStats();
+        return;
+      }
+      
+      // Poll /train/status every 3 s until training finishes
+      const poll = () => new Promise((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const statusRes = await axios.get(`${API_BASE_URL}/api/pcb/train/status`);
+            const { training_in_progress, model_trained, error: trainErr } = statusRes.data;
+            
+            if (!training_in_progress) {
+              clearInterval(interval);
+              if (model_trained) {
+                resolve(true);
+              } else {
+                reject(new Error(trainErr || 'Training failed — check server logs'));
+              }
+            }
+          } catch (e) {
+            clearInterval(interval);
+            reject(e);
+          }
+        }, 3000);
+        
+        // Safety timeout: 5 minutes
+        setTimeout(() => { clearInterval(interval); reject(new Error('Training timed out after 5 minutes')); }, 300000);
+      });
+      
+      await poll();
       setModelStatus({ trained: true, training: false });
       fetchStats();
     } catch (error) {
-      setError(error.response?.data?.detail || 'Failed to train model');
+      const msg = error.response?.data?.detail || error.message || 'Failed to train model';
+      setError(msg);
       setModelStatus(prev => ({ ...prev, training: false }));
     }
   };
